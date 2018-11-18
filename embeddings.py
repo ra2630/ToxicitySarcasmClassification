@@ -53,6 +53,8 @@ class Embeddings:
 
             lines_read = 0
             for line in f:
+                #if lines_read > 2000:
+                    #break
                 chunks = line.split(" ")
                 idx = self._add_word(chunks[0])
                 self.glove[idx] = [float(chunk) for chunk in chunks[1:]]
@@ -60,8 +62,6 @@ class Embeddings:
                     break
                 lines_read+=1
                 print("Read {}/{} lines in glove".format(lines_read, vocab_size), end = '\r')
-                if(lines_read > 2000):
-                    break
 
 
     def create_reduced_embeddings(self, embedding, words):

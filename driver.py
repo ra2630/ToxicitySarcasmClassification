@@ -14,6 +14,8 @@ from WordRNN import *
 from collections import Counter
 import operator
 
+import time
+
 
 with open("config.json",'r') as file:
     config = json.load(file)
@@ -82,7 +84,7 @@ parser.add_argument('--word_cell_size', type=int, default=config['word_cell_size
 parser.add_argument('--word_num_layers', type=int, default=config['word_num_layers'],
     help='Number of RNN layers in Word level model')
 
-parser.add_argument('--word_sentence_length', type=int, default=config['word_cell_size'],
+parser.add_argument('--word_sentence_length', type=int, default=config['word_sentence_length'],
     help='Max length of sentence for word level model')
 
 parser.add_argument('--word_cell_type', type=str, default=config['word_cell_type'],
@@ -140,7 +142,9 @@ def load_data(input_file):
     data_x = []
     data_x_len = []
     data_y = []
-    regular_count = 0
+    
+    counts = [0,0,0,0,0,0,0,0]
+
     logging.info("Reading from input file from {}".format(input_file))
     with open (input_file, 'r+', encoding="utf-8") as train_data:
 
@@ -156,18 +160,18 @@ def load_data(input_file):
         
         for row in data_reader:
             lines_read += 1
+            #if lines_read > 2000:
+                    #break
 
             print("Read {}/{} data points from input".format(lines_read, num_lines), end = '\r')
-            if(lines_read > 2000):
-                break
             comment_words = word_tokenize(row[1].lower())
+            
             hot_vectors = fetch(row[2:8])
             for hot_vector in hot_vectors:
+                counts = [sum(x) for x in zip(counts, hot_vector)]
                 if hot_vector[7]==1:
-                    if regular_count>20000:
+                    if counts[7]>20000:
                         continue
-                    else:
-                        regular_count += 1
                 comment_words = comment_words.copy()
                 if len(comment_words) < args.word_sentence_length:
                     comment_words += [PAD_WORD] * (args.word_sentence_length - len(comment_words))
@@ -179,7 +183,9 @@ def load_data(input_file):
                 data_y.append(hot_vector)
 
 
+
     logging.info("Inputs Loaded Successfully")
+    logging.info("Class Counts = {}".format(counts))
     logging.info("Shuffling data")
 
     combined = list(zip(data_x, data_x_len, data_y))
@@ -233,9 +239,14 @@ def train_AI(embedding_path, input_path, model_save_path):
     logging.info("Number of Validation Examples : {}, Number of batches : {}".format(len(validation_data_x) * args.batch_size, len(validation_data_x)))
     logging.info("Number of Test Examples : {}, Number of batches : {}".format(len(test_data_x) * args.batch_size, len(test_data_x)))
 
-    wordRNN = WordRNN(logging, args.lr, args.word_cell_size , args.word_num_layers, reduced_embeddings.glove, args.batch_size, args.word_sentence_length, 
-            args.word_cell_type, sess=tf.Session(), 
-            grad_clip=1.0, dropout_probability = 0.5)
+    # wordRNN = WordRNN_TF(logging, args.lr, args.word_cell_size , args.word_num_layers, reduced_embeddings.glove, args.batch_size, args.word_sentence_length, 
+    #         args.word_cell_type, sess=tf.Session(), 
+    #         grad_clip=1.0, dropout_probability = 0.5)
+
+
+    wordRNN = WordRNN_Trainer(logging, args.lr, args.word_cell_size, 
+        args.word_num_layers, reduced_embeddings.glove, args.batch_size, args.word_sentence_length, args.word_cell_type, 
+        args.gpu, args.gpu_number,dropout_probability = 0.5) 
 
 
     for epoch in range(1, args.num_epochs + 1):
@@ -244,12 +255,12 @@ def train_AI(embedding_path, input_path, model_save_path):
         wordRNN.fit(train_data_x, train_data_x_len, train_data_y, epoch)
         
         if epoch % args.save_after == 0:
-            wordRNN.saveSession(model_save_path +"_"+str(epoch))
+            wordRNN.save(model_save_path +"_"+str(epoch))
 
         if epoch % args.validate_after == 0:
             if len(validation_data_x) > 0:
                 logging.info("Testing on Validation Set : ")
-                wordRNN.test(validation_data_x, validation_data_x_len, validation_data_y)
+                wordRNN.test(validation_data_x, validation_data_x_len, validation_data_y, epoch)
             else:
                 logging.info("Valiation Set size is 0. Not Testing")
 
@@ -257,9 +268,18 @@ def train_AI(embedding_path, input_path, model_save_path):
     wordRNN.test(test_data_x, test_data_x_len, test_data_y)
 
 
+    
+    
+    #for epoch in range(1, args.num_epochs + 1):
+    #     epoch_loss = 0
+    #     batch_index = 0
+    #     trainer.fit(train_data_x, train_data_y, epoch)
+
+
 
 
 
 if __name__ == "__main__":
+
     train_AI(args.embedding_path, args.train_data, args.save_model)
 

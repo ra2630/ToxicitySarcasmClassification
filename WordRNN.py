@@ -1,11 +1,18 @@
 import tensorflow as tf
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.autograd import Variable
+import torchnet as tnt
+
 import numpy as np
 
-class WordRNN:
+class WordRNN_TF:
     def __init__(
         self, logging, learning_rate, cell_size , n_layers, glove, batch_size, sentence_size, 
-            cell_type = 'GRU', sess=tf.Session(), 
-                grad_clip=1.0, dropout_probability = 0.5):
+            cell_type , sess, grad_clip=1.0, dropout_probability = 0.5):
         
         self.learning_rate = learning_rate
         self.cell_size = cell_size
@@ -22,18 +29,18 @@ class WordRNN:
         self.build_graph()
         self.sess.run(tf.global_variables_initializer())
         
-    def saveSession(self, filepath):
+    def save(self, filepath):
         self.logging.info("Saving Session to file : {}".format(filepath))
         saver = tf.train.Saver()
         saver.save(self.sess, filepath)
         self.logging.info("Session Saved !")
         
-    def loadFromSession(self, filepath):
+    def load(self, filepath):
         self.logging.info("Loading Session from file ".format(filepath))
         saver = tf.train.Saver()
         saver.restore(self.sess, filepath)
         self.sess.run(tf.tables_initializer())
-        self.loging.info("Session restored !")
+        self.logging.info("Session restored !")
 
 
     def build_graph(self):
@@ -90,7 +97,7 @@ class WordRNN:
         if self.cell_type == 'LSTM':
             self.encoder_states = tf.concat(self.encoder_states, 2)
             self.encoder_states = tf.concat(self.encoder_states, 1)
-            self.encoder_states = tf.reshape(self.encoder_states, shape = (-1, self.embedding_dimensions * 4))
+            self.encoder_states = tf.reshape(self.encoder_states, shape = (-1, self.cell_size * 4))
             
         elif cell_type == 'GRU':
             self.encoder_states = tf.concat(self.encoder_states, 1)
@@ -175,4 +182,206 @@ class WordRNN:
         
         loss/=len(test_data_x)
         self.logging.info("Test Loss {} Accuracy {}/{} ({}%)".format(loss, total_acc, total_labels, (total_acc * 100.0)/total_labels))
+
+
+
+
+
+
+class WordRNN_Torch(nn.Module):
+    def __init__(
+        self, cell_size , n_layers, glove, cell_type , batch_size, GPU, gpu_number, dropout_probability = 0.5):
+
+        super(WordRNN_Torch, self).__init__()
+        
+        self.cell_size = cell_size
+        self.cell_type = cell_type
+        self.n_layers = n_layers
+        self.glove = glove
+        self.batch_size = batch_size
+        self.dropout_probability = dropout_probability
+
+        self.GPU = GPU
+        self.gpu_number = gpu_number
+
+
+        self.word_embeddings = nn.Embedding(self.glove.shape[0], self.glove.shape[1])
+        self.word_embeddings.load_state_dict({'weight': torch.from_numpy(self.glove)})
+        self.word_embeddings.weight.requires_grad = False
+        
+        self.lstm = nn.LSTM(self.glove.shape[1], self.cell_size,
+                            num_layers=self.n_layers, bidirectional=True, batch_first = True, dropout = dropout_probability)
+
+        self.linear = nn.Sequential(
+                nn.BatchNorm1d(4 * self.cell_size),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_probability),
+                nn.Linear(4 * self.cell_size, 512),
+
+                nn.BatchNorm1d(512),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_probability),
+                nn.Linear(512, 256),
+
+                nn.BatchNorm1d(256),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_probability),
+                nn.Linear(256, 128),
+
+                nn.BatchNorm1d(128),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_probability),
+                nn.Linear(128, 8),
+            )
+
+    def init_hidden(self):
+        if self.GPU:
+            return (torch.randn(2, self.batch_size, self.cell_size).cuda(self.gpu_number),
+                torch.randn(2, self.batch_size, self.cell_size).cuda(self.gpu_number))
+        else:
+            return (torch.randn(2, self.batch_size, self.cell_size),
+                torch.randn(2, self.batch_size, self.cell_size))
+
+
+    def update_batchsize(self, batch_size):
+        self.batch_size = batch_size
+
+
+    def forward(self, sentence):   
+        self.hidden = self.init_hidden()
+        embeds = self.word_embeddings(sentence)
+
+        _, (self.hidden_state, self.cell_state) = self.lstm(embeds, self.hidden)
+        
+        self.hidden_state = self.hidden_state.reshape(self.batch_size, -1)
+        self.cell_state = self.cell_state.reshape(self.batch_size, -1)
+
+        self.concateneated_state = torch.cat((self.cell_state, self.hidden_state), dim = -1)
+
+        answer_labels = self.linear(self.concateneated_state)
+        
+        return answer_labels
+
+
+class WordRNN_Trainer:
+    def __init__(
+        self, logging, learning_rate, cell_size , n_layers, glove, batch_size, sentence_size, 
+            cell_type, GPU, gpu_number, dropout_probability = 0.5):
+
+        self.GPU = torch.cuda.device_count() >= 1 and GPU
+        self.model = WordRNN_Torch(cell_size, n_layers, glove, cell_type, batch_size, self.GPU, gpu_number, dropout_probability)
+        self.gpu_number = gpu_number
+        self.batch_size = batch_size
+        self.logging = logging
+
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.loss_function = F.cross_entropy
+
+
+
+    def fit(self, train_data_x, train_data_x_len, train_data_y, epoch):
+
+        batch_index = 0
+        loss = 0
+
+        self.model.train()
+        confMatrix = tnt.meter.ConfusionMeter(8)
+
+        for batch_x, batch_y in zip(train_data_x, train_data_y):
+            batch_index += 1 
+            data_x = torch.from_numpy(np.array(batch_x, dtype=np.long))
+            data_y = torch.from_numpy(np.array(batch_y, dtype=np.int32))
+            data_y = torch.max(Variable(data_y), 1)[1]
+
+            self.model.update_batchsize(data_x.shape[0])
+
+            if self.GPU:
+                data_x = data_x.cuda(self.gpu_number)
+                data_y = data_y.cuda(self.gpu_number)
+                self.model = self.model.cuda(self.gpu_number)
+
+            self.optimizer.zero_grad()
+
+            prediction = self.model(data_x)
+
+            confMatrix.add(prediction.clone().detach(),data_y.clone().detach())
+
+            loss_value = self.loss_function(prediction, data_y)
+            loss_value.backward()
+            self.optimizer.step()
+
+            self.logging.info("Epoch {} Batch {} Loss {}".format(epoch, batch_index, loss_value))
+            loss += loss_value
+
+            print("Prediction : ", torch.nn.Softmax(dim = -1)(prediction), " data_y : ", data_y)
+
+        self.logging.info('\nConfusion Matrix on Train for epoch {} \n {}\n'.format(epoch,
+                    confMatrix.value()))
+            
+        loss/=len(train_data_x)
+        self.logging.info("Epoch {} Average Loss {}".format(epoch, loss))
+
+
+
+    def test(self, test_data_x, test_data_x_len, test_data_y, epoch):
+
+        batch_index = 0
+        loss = 0
+
+        confMatrix = tnt.meter.ConfusionMeter(8)
+
+        self.model.eval()
+
+        for batch_x, batch_y in zip(test_data_x, test_data_y):
+            batch_index += 1 
+            data_x = torch.from_numpy(np.array(batch_x, dtype=np.long))
+            data_y = torch.from_numpy(np.array(batch_y, dtype=np.int32))
+            data_y = torch.max(Variable(data_y), 1)[1]
+
+            self.model.update_batchsize(data_x.shape[0])
+
+            if self.GPU:
+                data_x = data_x.cuda(self.gpu_number)
+                data_y = data_y.cuda(self.gpu_number)
+                self.model = self.model.cuda(self.gpu_number)
+
+
+            prediction = self.model(data_x)
+
+            print("Prediction : ", torch.nn.Softmax(dim = -1)(prediction), " data_y : ", data_y)
+
+            confMatrix.add(prediction.clone().detach(),data_y.clone().detach())
+
+            loss_value = self.loss_function(prediction, data_y)
+
+            self.logging.info("Epoch {} Batch {} Loss {}".format(epoch, batch_index, loss_value))
+            loss += loss_value
+
+        self.logging.info('\nConfusion Matrix on Test \n{}\n'.format(
+            confMatrix.value()))
+            
+        loss/=len(test_data_x)
+        self.logging.info("Epoch {} Average Loss {}".format(epoch, loss))
+
+
+    def load(self, filepath):
+        self.logging.info("Loading model from file {}".format(filepath))
+        self.model.load_state_dict(torch.load(filepath, map_location='cpu'))
+        if(self.GPU):
+            self.model = self.model.cuda(gpu_number)
+        self.logging.info("Model loaded successfully !")
+
+
+    def save(self, filepath):
+        self.logging.info("Saving model to file {}".format(filepath))
+        if self.GPU:
+            torch.save(self.model.cpu().state_dict(), filepath)
+            self.model = self.model.cuda(self.gpu_number)
+        else:
+            torch.save(self.model.state_dict(), filepath)
+        self.logging.info("Model saved successfully !")
+
+
+
+
     
