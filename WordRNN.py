@@ -313,8 +313,6 @@ class WordRNN_Trainer:
             self.logging.info("Epoch {} Batch {} Loss {}".format(epoch, batch_index, loss_value))
             loss += loss_value
 
-            print("Prediction : ", torch.nn.Softmax(dim = -1)(prediction), " data_y : ", data_y)
-
         self.logging.info('\nConfusion Matrix on Train for epoch {} \n {}\n'.format(epoch,
                     confMatrix.value()))
             
@@ -347,8 +345,6 @@ class WordRNN_Trainer:
 
 
             prediction = self.model(data_x)
-
-            print("Prediction : ", torch.nn.Softmax(dim = -1)(prediction), " data_y : ", data_y)
 
             confMatrix.add(prediction.clone().detach(),data_y.clone().detach())
 
