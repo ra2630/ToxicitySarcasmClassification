@@ -53,8 +53,8 @@ class Embeddings:
 
             lines_read = 0
             for line in f:
-                #if lines_read > 2000:
-                    #break
+                # if lines_read > 2000:
+                #     break
                 chunks = line.split(" ")
                 idx = self._add_word(chunks[0])
                 self.glove[idx] = [float(chunk) for chunk in chunks[1:]]

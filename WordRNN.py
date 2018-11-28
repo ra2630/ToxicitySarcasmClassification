@@ -88,7 +88,7 @@ class WordRNN_TF:
             self.forward_cell,
             self.backward_cell, 
             document_emb,
-            time_major = True,
+            time_major = False, #TODO : Double check this value
             sequence_length=self.d_lengths,
             dtype=tf.float32
         )
@@ -213,34 +213,34 @@ class WordRNN_Torch(nn.Module):
                             num_layers=self.n_layers, bidirectional=True, batch_first = True, dropout = dropout_probability)
 
         self.linear = nn.Sequential(
-                nn.BatchNorm1d(4 * self.cell_size),
+                #nn.BatchNorm1d(4 * self.cell_size),
                 nn.ReLU(),
-                nn.Dropout(self.dropout_probability),
+                #nn.Dropout(self.dropout_probability),
                 nn.Linear(4 * self.cell_size, 512),
 
-                nn.BatchNorm1d(512),
+                #nn.BatchNorm1d(512),
                 nn.ReLU(),
-                nn.Dropout(self.dropout_probability),
+                #nn.Dropout(self.dropout_probability),
                 nn.Linear(512, 256),
 
-                nn.BatchNorm1d(256),
+                #nn.BatchNorm1d(256),
                 nn.ReLU(),
-                nn.Dropout(self.dropout_probability),
+                #nn.Dropout(self.dropout_probability),
                 nn.Linear(256, 128),
 
-                nn.BatchNorm1d(128),
+                #nn.BatchNorm1d(128),
                 nn.ReLU(),
-                nn.Dropout(self.dropout_probability),
+                #nn.Dropout(self.dropout_probability),
                 nn.Linear(128, 8),
             )
 
     def init_hidden(self):
         if self.GPU:
-            return (torch.randn(2, self.batch_size, self.cell_size).cuda(self.gpu_number),
-                torch.randn(2, self.batch_size, self.cell_size).cuda(self.gpu_number))
+            return (torch.zeros(2, self.batch_size, self.cell_size).cuda(self.gpu_number),
+                torch.zeros(2, self.batch_size, self.cell_size).cuda(self.gpu_number))
         else:
-            return (torch.randn(2, self.batch_size, self.cell_size),
-                torch.randn(2, self.batch_size, self.cell_size))
+            return (torch.zeros(2, self.batch_size, self.cell_size),
+                torch.zeros(2, self.batch_size, self.cell_size))
 
 
     def update_batchsize(self, batch_size):
@@ -376,6 +376,18 @@ class WordRNN_Trainer:
         else:
             torch.save(self.model.state_dict(), filepath)
         self.logging.info("Model saved successfully !")
+
+    
+    def infer(self, sentence):
+        self.model.eval()
+        data_x = sentence
+        self.model.update_batchsize(1)
+        if self.GPU:
+            data_x = data_x.cuda(self.gpu_number)
+        prediction = self.model(data_x)
+        prediction = torch.max(Variable(prediction), 1)[1]
+        prediction = prediction.cpu()
+        return prediction
 
 
 

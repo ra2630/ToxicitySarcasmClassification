@@ -160,18 +160,20 @@ def load_data(input_file):
         
         for row in data_reader:
             lines_read += 1
-            #if lines_read > 2000:
-                    #break
+            # if lines_read > 2000:
+            #         break
 
             print("Read {}/{} data points from input".format(lines_read, num_lines), end = '\r')
             comment_words = word_tokenize(row[1].lower())
             
             hot_vectors = fetch(row[2:8])
             for hot_vector in hot_vectors:
-                counts = [sum(x) for x in zip(counts, hot_vector)]
                 if hot_vector[7]==1:
                     if counts[7]>20000:
                         continue
+
+                counts = [sum(x) for x in zip(counts, hot_vector)]
+
                 comment_words = comment_words.copy()
                 if len(comment_words) < args.word_sentence_length:
                     comment_words += [PAD_WORD] * (args.word_sentence_length - len(comment_words))

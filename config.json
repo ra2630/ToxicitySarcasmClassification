@@ -1,6 +1,6 @@
 {
     "num_epochs": 50,
-    "batch_size": 32,
+    "batch_size": 64,
     "gpu": true,
     "gpu_number": 0,
     "lr": 0.001,
@@ -9,9 +9,9 @@
     "test_ratio": 0.05,
     "embedding_path": "/data/ra2630/SNLP/data/glove.42B.300d.txt",
     "train_data": "/data/ra2630/SNLP/data/train.csv",
-    "save_model": "/data/ra2630/SNLP/models/WordLSTM_",
+    "save_model": "/data/ra2630/SNLP/models/WordLSTM_Torch_",
     "log_dir": "/data/ra2630/SNLP/logs/",
-    "log_name": "WordLSTM_",
+    "log_name": "WordLSTM_Torch_",
     "print": false,
     "print_after": 1,
     "validate_after":1,
@@ -19,7 +19,7 @@
     "seed": 7,
     "word_cell_size": 600,
     "word_num_layers": 1,
-    "word_sentence_length": 50,
+    "word_sentence_length": 150,
     "word_cell_type": "LSTM",
     "vocab_size": 80000
 }
