@@ -353,7 +353,7 @@ class WordRNN_Trainer:
         for batch_x, batch_y in zip(test_data_x, test_data_y):
             batch_index += 1 
             data_x = torch.from_numpy(np.array(batch_x, dtype=np.long))
-            data_y = torch.from_numpy(np.array(batch_y, dtype=np.int32))
+            data_y = torch.from_numpy(np.array(batch_y, dtype=np.float32))
             #data_y = torch.max(Variable(data_y), 1)[1]
 
             self.model.update_batchsize(data_x.shape[0])
@@ -368,7 +368,7 @@ class WordRNN_Trainer:
 
             confMatrix.add(prediction.clone().detach(),data_y.clone().detach())
 
-            loss_value = self.loss_function(prediction, data_y)
+            loss_value = self.custom_loss_function(prediction, data_y)
 
             self.logging.info("Epoch {} Batch {} Loss {}".format(epoch, batch_index, loss_value))
             loss += loss_value
