@@ -40,12 +40,6 @@ parser.add_argument('--lr', type=float, default=config['lr'],
 parser.add_argument('--train_ratio', type=float, default=config['train_ratio'],
     help='Ratio for Training Examples')
 
-parser.add_argument('--validation_ratio', type=float, default=config['validation_ratio'],
-    help='Ratio for Validation Examples')
-
-parser.add_argument('--test_ratio', type=float, default=config['test_ratio'],
-    help='Ratio for Test Examples')
-
 parser.add_argument('--embedding_path', default=config['embedding_path'], type=str,
     help='path to embeddings')
 
@@ -90,7 +84,6 @@ parser.add_argument('--word_sentence_length', type=int, default=config['word_sen
 parser.add_argument('--word_cell_type', type=str, default=config['word_cell_type'],
     help='Type of cell (LSTM/GRU) for word level RNN')
 
-
 parser.add_argument('--vocab_size', type=int, default=config['vocab_size'],
     help='Max length of sentence for word level model')
 
@@ -116,34 +109,55 @@ if args.print:
 
 logging.info(args)
 
-if(args.train_ratio + args.test_ratio + args.validation_ratio != 1.0):
-    raise ValueError('Sum of Train, Test and Validation Ratios must be 1.0')
-
-def fetch(row):
-    all_hot_vectors = []
-    labels = [i for i, x in enumerate(row) if x == '1']
-    for label in labels:
-        hot_vector = np.zeros((8))
-        hot_vector[label] = 1
-        all_hot_vectors.append(hot_vector)
-    if len(all_hot_vectors) == 0:
-        hot_vector = np.zeros((8))
-        hot_vector[7] = 1
-        all_hot_vectors.append(hot_vector)
-    return all_hot_vectors
-
-def findKMostFrequentWords(data, k):
+def find_k_most_frequent_words(data, k):
     ctr = Counter([word for sublist in data for word in sublist])
     sorted_ctr = sorted(ctr.items(), key=operator.itemgetter(1), reverse=True)
     return [item[0] for item in sorted_ctr[0:k]]
 
 
-def load_data(input_file):
+def load(input_path):
+    kaggle_toxic_train_file = input_path + 'ToxicDataKaggle/kaggle_toxic_train.csv'
+    kaggle_regular_train_file = input_path + 'ToxicDataKaggle/kaggle_regular_train.csv'
+    reddit_sarcasm_train_file = input_path + 'SarcasmRedditData/reddit_sarcasm_train.csv'
+
+    kaggle_toxic_val_file = input_path + 'ToxicDataKaggle/kaggle_toxic_validate.csv'
+    kaggle_regular_val_file = input_path + 'ToxicDataKaggle/kaggle_regular_validate.csv'
+    reddit_sarcasm_val_file = input_path + 'SarcasmRedditData/reddit_sarcasm_validate.csv'
+
+
+
+    toxic_data_x_train, toxic_data_x_len_train, toxic_data_y_train = load_data(kaggle_toxic_train_file, 0)
+    sarcasm_data_x_train, sarcasm_data_x_len_train, sarcasm_data_y_train = load_data(reddit_sarcasm_train_file, 1)
+    regular_data_x_train, regular_data_x_len_train, regular_data_y_train = load_data(kaggle_regular_train_file, 2)
+
+    #toxic_data_x_val, toxic_data_x_len_val, toxic_data_y_val = load_data(kaggle_toxic_val_file, 0)
+    #sarcasm_data_x_val, sarcasm_data_x_len_val, sarcasm_data_y_val = load_data(reddit_sarcasm_val_file, 1)
+    #regular_data_x_val, regular_data_x_len_val, regular_data_y_val = load_data(kaggle_regular_val_file, 2)
+
+    data_x_train = toxic_data_x_train + sarcasm_data_x_train + regular_data_x_train
+    data_x_len_train = toxic_data_x_len_train + sarcasm_data_x_len_train + regular_data_x_len_train
+    data_y_train = toxic_data_y_train + sarcasm_data_y_train + regular_data_y_train
+
+    #data_x_val = toxic_data_x_val + sarcasm_data_x_val + regular_data_x_val
+    #data_x_len_val = toxic_data_x_len_val + sarcasm_data_x_len_val + regular_data_x_len_val
+    #data_y_val = toxic_data_y_val + sarcasm_data_y_val + regular_data_y_val
+
+    data_x_val = []
+    data_x_len_val = []
+    data_y_val = []
+
+    combined = list(zip(data_x_train, data_x_len_train, data_y_train))
+    random.shuffle(combined)
+    data_x_train, data_x_len_train, data_y_train = zip(*combined)
+
+    return data_x_train, data_x_len_train, data_y_train, data_x_val, data_x_len_val, data_y_val
+
+
+
+def load_data(input_file, label):
     data_x = []
     data_x_len = []
     data_y = []
-    
-    counts = [0,0,0,0,0,0,0,0]
 
     logging.info("Reading from input file from {}".format(input_file))
     with open (input_file, 'r+', encoding="utf-8") as train_data:
@@ -164,39 +178,28 @@ def load_data(input_file):
             #         break
 
             print("Read {}/{} data points from input".format(lines_read, num_lines), end = '\r')
-            comment_words = word_tokenize(row[1].lower())
-            
-            hot_vectors = fetch(row[2:8])
-            for hot_vector in hot_vectors:
-                if hot_vector[7]==1:
-                    if counts[7]>20000:
-                        continue
+            if label == 1: #Sarcasm Data. INclude parent also
+                comment_words = word_tokenize(row[3].lower() + row[2].lower())
+            else:
+                comment_words = word_tokenize(row[2].lower())
 
-                counts = [sum(x) for x in zip(counts, hot_vector)]
+            comment_words = comment_words.copy()
 
-                comment_words = comment_words.copy()
-                if len(comment_words) < args.word_sentence_length:
-                    comment_words += [PAD_WORD] * (args.word_sentence_length - len(comment_words))
-                elif len(comment_words) > args.word_sentence_length:
-                    comment_words = comment_words[:args.word_sentence_length]
-                comment_words = [START_WORD] + comment_words + [END_WORD]
-                data_x.append(comment_words)
-                data_x_len.append(min(args.word_sentence_length, len(comment_words)) + 2)
-                data_y.append(hot_vector)
+            if len(comment_words) < args.word_sentence_length:
+                comment_words += [PAD_WORD] * (args.word_sentence_length - len(comment_words))
+            elif len(comment_words) > args.word_sentence_length:
+                comment_words = comment_words[:args.word_sentence_length]
+
+            comment_words = [START_WORD] + comment_words + [END_WORD]
+            data_x.append(comment_words)
+            data_x_len.append(min(args.word_sentence_length, len(comment_words)) + 2)
+            data_y.append(list(np.eye(3)[label]))
 
 
 
     logging.info("Inputs Loaded Successfully")
-    logging.info("Class Counts = {}".format(counts))
-    logging.info("Shuffling data")
-
-    combined = list(zip(data_x, data_x_len, data_y))
-    random.shuffle(combined)
-    data_x, data_x_len, data_y = zip(*combined)
-
-    logging.info("Data shuffled successfully !!")
-
     return data_x, data_x_len, data_y
+
 
 def create_batches(batch_size, data_x, data_x_len, data_y):
     
@@ -213,9 +216,8 @@ def convertToTokens(data, embedding):
     
 
 def train_AI(embedding_path, input_path, model_save_path):
-
-    data_x, data_x_len, data_y = load_data(input_path)
-    words = findKMostFrequentWords(data_x, args.vocab_size)
+    data_x_train, data_x_len_train, data_y_train, data_x_val, data_x_len_val, data_y_val = load(input_path)
+    words = find_k_most_frequent_words(data_x_train, args.vocab_size)
 
     full_embeddings = Embeddings()
     full_embeddings.create_embeddings_from_file(embedding_path)
@@ -225,21 +227,23 @@ def train_AI(embedding_path, input_path, model_save_path):
     
     logging.info("Full Glove shape : {}".format(full_embeddings.glove.shape))
     logging.info("Reduced Glove shape : {}".format(reduced_embeddings.glove.shape))
-    data_x = convertToTokens(data_x, reduced_embeddings)
+    data_x_train = convertToTokens(data_x_train, reduced_embeddings)
 
-    batch_x, batch_x_len, batch_y = create_batches(args.batch_size, data_x, data_x_len, data_y)
+    batch_x, batch_x_len, batch_y = create_batches(args.batch_size, data_x_train, data_x_len_train,
+                                                           data_y_train)
+
+
 
     train_len = int(args.train_ratio*len(batch_x))
-    validation_len = train_len + int(args.test_ratio*len(batch_x))
 
     train_data_x, train_data_x_len, train_data_y = batch_x[:train_len], batch_x_len[:train_len], batch_y[:train_len]
-    validation_data_x, validation_data_x_len, validation_data_y = batch_x[train_len:validation_len], batch_x_len[train_len:validation_len], batch_y[train_len:validation_len]
-    test_data_x, test_data_x_len, test_data_y = batch_x[validation_len:], batch_x_len[validation_len:], batch_y[validation_len:]
-    
+    validation_data_x, validation_data_x_len, validation_data_y = batch_x[train_len:], batch_x_len[train_len:], batch_y[train_len:]
+
+
     
     logging.info("Number of Training Examples : {}, Number of batches : {}".format(len(train_data_x) * args.batch_size, len(train_data_x)))
     logging.info("Number of Validation Examples : {}, Number of batches : {}".format(len(validation_data_x) * args.batch_size, len(validation_data_x)))
-    logging.info("Number of Test Examples : {}, Number of batches : {}".format(len(test_data_x) * args.batch_size, len(test_data_x)))
+
 
     # wordRNN = WordRNN_TF(logging, args.lr, args.word_cell_size , args.word_num_layers, reduced_embeddings.glove, args.batch_size, args.word_sentence_length, 
     #         args.word_cell_type, sess=tf.Session(), 
@@ -248,7 +252,7 @@ def train_AI(embedding_path, input_path, model_save_path):
 
     wordRNN = WordRNN_Trainer(logging, args.lr, args.word_cell_size, 
         args.word_num_layers, reduced_embeddings.glove, args.batch_size, args.word_sentence_length, args.word_cell_type, 
-        args.gpu, args.gpu_number,dropout_probability = 0.5) 
+        args.gpu, args.gpu_number, 3,dropout_probability = 0.5)
 
 
     for epoch in range(1, args.num_epochs + 1):
@@ -267,7 +271,7 @@ def train_AI(embedding_path, input_path, model_save_path):
                 logging.info("Valiation Set size is 0. Not Testing")
 
     logging.info("Testing on Test Set")
-    wordRNN.test(test_data_x, test_data_x_len, test_data_y)
+    #wordRNN.test(test_data_x, test_data_x_len, test_data_y)
 
 
     

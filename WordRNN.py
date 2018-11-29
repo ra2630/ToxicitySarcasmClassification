@@ -99,7 +99,7 @@ class WordRNN_TF:
             self.encoder_states = tf.concat(self.encoder_states, 1)
             self.encoder_states = tf.reshape(self.encoder_states, shape = (-1, self.cell_size * 4))
             
-        elif cell_type == 'GRU':
+        elif self.cell_type == 'GRU':
             self.encoder_states = tf.concat(self.encoder_states, 1)
 
         self.encoder_states = tf.cast(self.encoder_states,tf.float32)
@@ -190,7 +190,8 @@ class WordRNN_TF:
 
 class WordRNN_Torch(nn.Module):
     def __init__(
-        self, cell_size , n_layers, glove, cell_type , batch_size, GPU, gpu_number, dropout_probability = 0.5):
+        self, cell_size , n_layers, glove, cell_type , batch_size, GPU, gpu_number, output_classes,
+            dropout_probability = 0.5):
 
         super(WordRNN_Torch, self).__init__()
         
@@ -231,7 +232,7 @@ class WordRNN_Torch(nn.Module):
                 #nn.BatchNorm1d(128),
                 nn.ReLU(),
                 #nn.Dropout(self.dropout_probability),
-                nn.Linear(128, 8),
+                nn.Linear(128, output_classes),
             )
 
     def init_hidden(self):
@@ -266,16 +267,35 @@ class WordRNN_Torch(nn.Module):
 class WordRNN_Trainer:
     def __init__(
         self, logging, learning_rate, cell_size , n_layers, glove, batch_size, sentence_size, 
-            cell_type, GPU, gpu_number, dropout_probability = 0.5):
+            cell_type, GPU, gpu_number, output_classes, dropout_probability = 0.5):
 
         self.GPU = torch.cuda.device_count() >= 1 and GPU
-        self.model = WordRNN_Torch(cell_size, n_layers, glove, cell_type, batch_size, self.GPU, gpu_number, dropout_probability)
+        self.model = WordRNN_Torch(cell_size, n_layers, glove, cell_type, batch_size, self.GPU, gpu_number,
+                                   output_classes, dropout_probability)
+
+        self.output_classes = output_classes
         self.gpu_number = gpu_number
         self.batch_size = batch_size
         self.logging = logging
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.loss_function = F.cross_entropy
+
+    def custom_loss_function(self, prediction, gold):
+        mask = torch.Tensor(np.array([[1.0,1.0,1.0], [0.0,1.0,1.0], [1.0,0.0,1.0]]))
+
+        if self.GPU:
+            mask = mask.cuda(self.gpu_number)
+
+        loss_value = nn.BCELoss(reduce=False)(nn.Sigmoid()(prediction), gold)
+
+        with torch.no_grad():
+            for idx, g in enumerate(gold):
+                loss_value[idx] = mask[int(torch.argmax(gold[idx].data))] * loss_value[idx]
+
+        return torch.mean(loss_value);
+
+
+
 
 
 
@@ -285,13 +305,13 @@ class WordRNN_Trainer:
         loss = 0
 
         self.model.train()
-        confMatrix = tnt.meter.ConfusionMeter(8)
+        confMatrix = tnt.meter.ConfusionMeter(self.output_classes)
 
         for batch_x, batch_y in zip(train_data_x, train_data_y):
             batch_index += 1 
             data_x = torch.from_numpy(np.array(batch_x, dtype=np.long))
-            data_y = torch.from_numpy(np.array(batch_y, dtype=np.int32))
-            data_y = torch.max(Variable(data_y), 1)[1]
+            data_y = torch.from_numpy(np.array(batch_y, dtype=np.float32))
+            #data_y = torch.max(Variable(data_y), 1)[1]
 
             self.model.update_batchsize(data_x.shape[0])
 
@@ -306,7 +326,7 @@ class WordRNN_Trainer:
 
             confMatrix.add(prediction.clone().detach(),data_y.clone().detach())
 
-            loss_value = self.loss_function(prediction, data_y)
+            loss_value = self.custom_loss_function(prediction, data_y)
             loss_value.backward()
             self.optimizer.step()
 
@@ -326,7 +346,7 @@ class WordRNN_Trainer:
         batch_index = 0
         loss = 0
 
-        confMatrix = tnt.meter.ConfusionMeter(8)
+        confMatrix = tnt.meter.ConfusionMeter(self.output_classes)
 
         self.model.eval()
 
@@ -334,7 +354,7 @@ class WordRNN_Trainer:
             batch_index += 1 
             data_x = torch.from_numpy(np.array(batch_x, dtype=np.long))
             data_y = torch.from_numpy(np.array(batch_y, dtype=np.int32))
-            data_y = torch.max(Variable(data_y), 1)[1]
+            #data_y = torch.max(Variable(data_y), 1)[1]
 
             self.model.update_batchsize(data_x.shape[0])
 
